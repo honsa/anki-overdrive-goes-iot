@@ -26,6 +26,7 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <errno.h>
+#include <QRegularExpression>
 
 Joystick::Joystick() {
   openPath("/dev/input/js0");
@@ -39,6 +40,18 @@ Joystick::Joystick(int joystickNumber) {
 }
 
 Joystick::Joystick(const std::string& devicePath) {
+  // Try to extract js index from the path (e.g. /dev/input/js2)
+  const QString path = QString::fromStdString(devicePath);
+  QRegularExpression re("js(\\d+)$");
+  QRegularExpressionMatch m = re.match(path);
+  if (m.hasMatch()) {
+      bool ok = false;
+      int idx = m.captured(1).toInt(&ok);
+      if (ok) {
+          joystickNumber = idx;
+      }
+  }
+
   openPath(devicePath);
 }
 
@@ -52,14 +65,18 @@ bool Joystick::sample(JoystickEvent* event) {
   sstm << "/dev/input/js" << joystickNumber;
   QString deviceName = QString::fromStdString(sstm.str());
   QFileInfo check_device(deviceName);
-  
+
+  // If this Joystick was created with a devicePath (not just a number), prefer that.
+  // For simplicity we keep using /dev/input/jsN re-open logic, but at least joystickNumber
+  // is now consistent with the provided path.
+
   if (!reInit && !check_device.exists()) {
     close(_fd);
     reInit = true;
   } else {
       if (reInit && check_device.exists()) {
           reInit = false;
-    _fd = 0;
+          _fd = 0;
           openPath(deviceName.toStdString());
       }
   }

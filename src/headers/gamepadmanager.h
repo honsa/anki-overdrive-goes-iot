@@ -15,8 +15,13 @@ class GamepadManager : public QThread {
     Q_OBJECT
 private:
     QList<Joystick*> gamepadList;
+
 public:
     explicit GamepadManager(int count, QObject* parent = 0);
+
+    // Creates Joystick objects for existing /dev/input/js* devices and attaches them
+    // one-to-one to the provided racecars (in order). Returns number of attached gamepads.
+    int attachAvailableGamepads(const QList<Racecar*>& racecars);
 
     QList<Joystick*> getGamepads();
     Joystick* getGamepad(int index);

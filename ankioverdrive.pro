@@ -13,7 +13,16 @@ TEMPLATE = app
 TARGET = build/ankioverdrive
 INCLUDEPATH += .
 
-LIBS += -lmosquittopp
+# MQTT/Mosquitto is optional. If not present, we compile without MQTT support.
+mosqpp_exists = $$system(pkg-config --exists libmosquittopp && echo yes)
+contains(mosqpp_exists, yes) {
+    message("Building with MQTT (libmosquittopp found via pkg-config)")
+    LIBS += $$system(pkg-config --libs libmosquittopp)
+    QMAKE_CXXFLAGS += $$system(pkg-config --cflags libmosquittopp)
+} else {
+    message("Building WITHOUT MQTT (libmosquittopp not found)")
+    DEFINES += DISABLE_MQTT
+}
 
 LIBS += -L/usr/lib
 
@@ -25,7 +34,6 @@ SOURCES += src/main.cpp \
     src/ankimessage.cpp \
     src/trackpiece.cpp \
     src/track.cpp \
-    src/mqttclient.cpp \
     src/json.cpp \
     src/drivemode.cpp \
     src/joystick.cc \
@@ -34,12 +42,16 @@ SOURCES += src/main.cpp \
     src/racecar.cpp \
     src/tragediyimplementation.cpp
 
+!contains(DEFINES, DISABLE_MQTT) {
+    SOURCES += src/mqttclient.cpp
+    HEADERS += src/headers/mqttclient.h
+}
+
 HEADERS += \
     src/headers/bluetoothcontroller.h \
     src/headers/ankimessage.h \
     src/headers/trackpiece.h \
     src/headers/track.h \
-    src/headers/mqttclient.h \
     src/headers/json.h \
     src/headers/drivemode.h \
     src/headers/joystick.hh \

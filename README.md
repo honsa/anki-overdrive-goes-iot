@@ -15,6 +15,9 @@ This project was developed and tested on Linux **only**. To our best knowledge e
 The library used for reading gamepad inputs ([joystick++](https://github.com/drewnoakes/joystick)) also requires a UNIX system.
 The sample application, Anki Overdrive goes IoT, establishes connection to up to four cars and enables the user to control them via gamepads. It further establishes connection to a MQTT broker to send status updates or receive commands from the cloud.
 
+> Note: The maximum number of cars is configurable in `src/headers/drivemode.h` via `numberOfRacecars`.
+
+
 ## Prerequisites
 
 ### Qt 5.7 (or newer)

@@ -11,13 +11,17 @@
 #include "headers/json.h"
 #include "headers/tragediyimplementation.h"
 #include "headers/ankimessage.h"
+#ifndef DISABLE_MQTT
 #include "headers/mqttclient.h"
+#endif
 
 #include "unistd.h"
 #include <QProcess>
 
+const int DriveMode::kMaxRacecars = 7;
 
-DriveMode::DriveMode(QObject *parent) : QObject(parent) {
+DriveMode::DriveMode(int activeRacecars, QObject *parent)
+    : QObject(parent), activeRacecars(qBound(1, activeRacecars, kMaxRacecars)) {
 
     uuid = QUuid::createUuid();
 
@@ -25,7 +29,7 @@ DriveMode::DriveMode(QObject *parent) : QObject(parent) {
 
     TragediyImplementation::clearLocationTable();
 
-    gamepadManager = new GamepadManager(numberOfRacecars, this);
+    gamepadManager = new GamepadManager(this->activeRacecars, this);
 
     connect(gamepadManager, SIGNAL(turboMode(Racecar*, bool)), this, SLOT(turboMode(Racecar*, bool)));
     connect(gamepadManager, SIGNAL(doUturn(Racecar*, bool)), this, SLOT(doUturn(Racecar*, bool)));
@@ -36,7 +40,7 @@ DriveMode::DriveMode(QObject *parent) : QObject(parent) {
 
     gamepadManager->start();
 
-    for (int i = 0; i < numberOfRacecars; i++) {
+    for (int i = 0; i < this->activeRacecars; i++) {
         racecarList.append(new Racecar(this));
     }
 
@@ -57,6 +61,7 @@ DriveMode::DriveMode(QObject *parent) : QObject(parent) {
     }
 
     if (enableMqtt) {
+#ifndef DISABLE_MQTT
         qDebug() << ">> CHECKING MQTT BROKER AVAILABILITY...";
         while (QProcess::execute(QString("ping -c 1 %0").arg(brokerIp)) != 0)  {
             usleep(10000000);
@@ -69,6 +74,9 @@ DriveMode::DriveMode(QObject *parent) : QObject(parent) {
         qDebug() << ">> ATTEMPTING TO CONNECT TO MQTT BROKER...";
         connect(mqttClient, SIGNAL(onMessage(MqttMessage)), this, SLOT(onMqttMessage(MqttMessage)));
         qDebug() << ">> SUCCESSFULLY CONNECTED TO MQTT BROKER.";
+#else
+        qWarning() << ">> MQTT requested, but this build was compiled without MQTT support (DISABLE_MQTT).";
+#endif
     }
 
     batteryUpdateTimer = new QTimer(this);
@@ -85,9 +93,13 @@ void DriveMode::quit() {
 }
 
 void DriveMode::publishMessage(QByteArray message) {
+#ifndef DISABLE_MQTT
     if (enableMqtt) {
         mqttClient->publish(0, c2sChannel.toStdString().c_str(), message.length(), message);
     }
+#else
+    (void)message;
+#endif
 }
 
 void DriveMode::disconnected() {
@@ -118,17 +130,36 @@ void DriveMode::ready() {
 
     Racecar* racecar = static_cast<Racecar*>(QObject::sender());
 
-    Joystick* gamepad = gamepadManager->addGamepad(racecar);
+    // If no gamepads are attached yet, auto-discover /dev/input/js* once and bind them to cars.
+    if (gamepadManager->getGamepads().isEmpty()) {
+        gamepadManager->attachAvailableGamepads(racecarList);
+    }
 
-    if (!gamepad->isFound()) {
+    Joystick* gamepad = gamepadManager->getGamepad(racecar);
+
+    // If this specific car doesn't have a gamepad yet (e.g. more cars than gamepads), fall back.
+    if (!gamepad) {
+        gamepad = gamepadManager->addGamepad(racecar);
+    }
+
+    const bool gamepadOk = gamepad && gamepad->isFound();
+
+    if (!gamepadOk) {
         sendMessage("[" + racecar->getAddress().toString() + "]>> ATTEMPT TO ACCESS GAMEPAD FAILED.");
         qDebug().noquote().nospace() << "[" + racecar->getAddress().toString() + "]" << ">> ATTEMPT TO ACCESS GAMEPAD FAILED.";
+
+        // Minimal fallback: give a tiny initial nudge so it is obvious that driving works.
+        // This is intentionally small and short.
+        racecar->ignoreInputs(true);
+        racecar->setVelocity(200, (uint16_t)12500);
+        QTimer::singleShot(300, racecar, [racecar]() { racecar->setVelocity(0, (uint16_t)12500); });
     }
 
     sendMessage("[" + racecar->getAddress().toString() + "]>> USING GAMEPAD #" + (gamepadManager->getGamepads().indexOf(gamepad) + 1) + ".");
     qDebug().noquote().nospace() << "[" + racecar->getAddress().toString() + "]" << ">> USING GAMEPAD #" << gamepadManager->getGamepads().indexOf(gamepad) + 1 << ".";
 
-    racecar->ignoreInputs(false);
+    // Only enable inputs if we actually have a working gamepad.
+    racecar->ignoreInputs(!gamepadOk);
 
     sendMessage("[" + racecar->getAddress().toString() + "]>> READY.");
     qDebug().noquote().nospace() << "[" + racecar->getAddress().toString() + "]" << ">> READY.";
@@ -273,6 +304,9 @@ void DriveMode::acceleratorChanged(Racecar *racecar, double value) {
         return;
     }
 
+    // Debug helper: shows whether trigger values are arriving.
+    // qDebug() << "[" << racecar->getAddress().toString() << "] trigger=" << value;
+
     uint16_t newValue = value * maxVelocity;
     bool changed = false;
 
@@ -337,6 +371,7 @@ void DriveMode::positionUpdate(AnkiMessage ankiMessage) {
     publishMessage(Json::getPositionJson(racecar->getAddress(), entry));
 }
 
+#ifndef DISABLE_MQTT
 void DriveMode::onMqttMessage(MqttMessage mqttMessage) {
     if (mqttMessage.getTopic() != s2cChannel)
         return;
@@ -512,6 +547,7 @@ void DriveMode::onMqttMessage(MqttMessage mqttMessage) {
         }
     }
 }
+#endif
 
 Racecar* DriveMode::getRacecarByAddress(QBluetoothAddress address) {
     foreach (Racecar* racecar, racecarList) {

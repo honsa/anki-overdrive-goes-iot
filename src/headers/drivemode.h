@@ -11,9 +11,16 @@
 #include "bluetoothcontroller.h"
 #include "racecar.h"
 #include "gamepadmanager.h"
+#ifndef DISABLE_MQTT
 #include "mqttclient.h"
+#endif
 #include <QTimer>
 #include "track.h"
+
+#ifdef DISABLE_MQTT
+class MqttMessage;
+class MqttClient;
+#endif
 
 class DriveMode : public QObject {
     Q_OBJECT
@@ -31,7 +38,9 @@ private:
     // Channel used for car control
     const QString s2cChannel = "control";
 
-    const int numberOfRacecars = 4;
+    // Max supported cars (compile-time capacity) vs. active cars (runtime)
+    static const int kMaxRacecars;
+    const int activeRacecars;
 
     uint16_t maxVelocity = 800;
     uint16_t nitroVelocity = 1200;
@@ -63,7 +72,7 @@ private:
     float yMin = 0.0f;
 
 public:
-    explicit DriveMode(QObject *parent = 0);
+    explicit DriveMode(int activeRacecars = 4, QObject *parent = 0);
     void quit();
 
 signals:
@@ -91,7 +100,9 @@ public slots:
     void stoppedAtStart();
     void velocityUpdate();
 
+#ifndef DISABLE_MQTT
     void onMqttMessage(MqttMessage mqttMessage);
+#endif
 };
 
 #endif // DRIVEMODE_H
